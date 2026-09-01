@@ -17,7 +17,6 @@ import {
   ArrowUp,
   ArrowDown,
   ArrowUpDown,
-  Wallet,
 } from "lucide-react";
 import {
   ResponsiveContainer,
@@ -152,7 +151,7 @@ function Barcode({ value = "" }) {
 }
 
 function downloadCSV(items) {
-  const headers = ["Name", "SKU", "Condition", "Category", "Quantity", "Unit", "Unit Cost", "Total Value", "Reorder Threshold", "Status"];
+  const headers = ["Name", "SKU", "Condition", "Category", "Quantity", "Unit", "Reorder Threshold", "Status"];
   const rows = items.map((it) => {
     const status = stockStatus(it.quantity, it.threshold);
     return [
@@ -162,8 +161,6 @@ function downloadCSV(items) {
       it.category || "",
       it.quantity,
       it.unit,
-      it.unitCost || 0,
-      (it.unitCost || 0) * it.quantity,
       it.threshold ?? 5,
       status.label,
     ];
@@ -238,6 +235,7 @@ export default function InventorySystem() {
         return (order[stockStatus(a.quantity, a.threshold).key] - order[stockStatus(b.quantity, b.threshold).key]) * dir;
       }
       if (sortKey === "category") return (a.category || "").localeCompare(b.category || "") * dir;
+      if (sortKey === "sku") return (a.sku || "").localeCompare(b.sku || "", undefined, { numeric: true }) * dir;
       return a.name.localeCompare(b.name) * dir;
     });
     return list;
@@ -246,10 +244,9 @@ export default function InventorySystem() {
   const totals = useMemo(() => {
     const totalItems = items.length;
     const totalUnits = items.reduce((s, it) => s + it.quantity, 0);
-    const totalValue = items.reduce((s, it) => s + (it.unitCost || 0) * it.quantity, 0);
     const lowStock = items.filter((it) => it.quantity > 0 && it.quantity <= (it.threshold ?? 5));
     const outOfStock = items.filter((it) => it.quantity <= 0);
-    return { totalItems, totalUnits, totalValue, lowStock, outOfStock };
+    return { totalItems, totalUnits, lowStock, outOfStock };
   }, [items]);
 
   async function addItem(newItemDraft) {
@@ -343,6 +340,30 @@ export default function InventorySystem() {
         .inv-th:hover { color: ${TOKENS.ink}; }
         input, select { outline: none; }
         input:focus, select:focus { box-shadow: 0 0 0 3px ${TOKENS.tealSoft}; border-color: ${TOKENS.teal} !important; }
+        .inv-table { width: 100%; table-layout: fixed; }
+        .inv-barcode-cell { min-width: 145px; }
+        .inv-barcode svg { width: 130px !important; height: 30px !important; }
+        .inv-alert-list { max-height: 220px; overflow-y: auto; padding-right: 4px; }
+        .inv-alert-list::-webkit-scrollbar { width: 6px; }
+        .inv-alert-list::-webkit-scrollbar-thumb { background: ${TOKENS.border}; border-radius: 8px; }
+        .inv-add-form { width: 100%; }
+        .inv-edit-modal { width: min(760px, calc(100vw - 32px)); max-width: 760px; overflow: hidden; }
+        .inv-edit-layout { display: grid; grid-template-columns: 150px minmax(0, 1fr); gap: 20px; }
+        .inv-edit-fields { min-width: 0; }
+        .inv-log-filter { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        @media (max-width: 900px) {
+          .inv-table { min-width: 760px; }
+          .inv-items-scroll { overflow-x: auto !important; }
+        }
+        @media (max-width: 640px) {
+          .inv-edit-modal { width: calc(100vw - 20px); padding: 16px !important; }
+          .inv-edit-layout { grid-template-columns: 1fr; }
+          .inv-edit-image { display: flex; justify-content: center; }
+          .inv-edit-fields > div { width: 100%; }
+          .inv-log-filter { width: 100%; }
+          .inv-log-filter input { flex: 1; min-width: 120px; }
+        }
+
       `}</style>
      
       {/* Sidebar */}
@@ -409,7 +430,6 @@ export default function InventorySystem() {
           <div className="inv-mono" style={{ fontSize: "11px", color: "#8890A0", lineHeight: 1.6 }}>
             <div>{totals.totalItems} item(s)</div>
             <div>{totals.totalUnits} total units</div>
-            <div>{money(totals.totalValue)} value</div>
             {totals.lowStock.length > 0 && <div style={{ color: TOKENS.amber }}>{totals.lowStock.length} low stock</div>}
             {totals.outOfStock.length > 0 && <div style={{ color: "#F87171" }}>{totals.outOfStock.length} out of stock</div>}
           </div>
@@ -497,7 +517,6 @@ function DashboardView({ items, transactions, totals, onGoToItems, onSelectItem 
   const kpis = [
     { label: "Total items", value: totals.totalItems, color: TOKENS.ink },
     { label: "Total units", value: totals.totalUnits, color: TOKENS.teal },
-    { label: "Inventory value", value: money(totals.totalValue), color: TOKENS.ink, icon: Wallet },
     { label: "Low stock", value: totals.lowStock.length, color: TOKENS.amber },
     { label: "Out of stock", value: totals.outOfStock.length, color: TOKENS.red },
   ];
@@ -609,88 +628,98 @@ function DashboardView({ items, transactions, totals, onGoToItems, onSelectItem 
       {/* ----------- STOCK ALERTS --------------- */}
 
       <div style={{ display: "grid", gridTemplateColumns: "1.1fr 1fr", gap: "16px" }}>
-        <div style={{ background: TOKENS.surface, border: `1px solid ${TOKENS.border}`, borderRadius: "12px", padding: "16px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "12px" }}>
-            <AlertTriangle size={15} color={TOKENS.amber} />
-            <span style={{ fontSize: "13px", fontWeight: 700 }}>Stock alerts</span>
-          </div>
-          {alerts.length === 0 ? (
-            <div style={{ fontSize: "12.5px", color: TOKENS.inkSoft }}>Everything is well stocked.</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "4px" }}>
-              {alerts.map((it) => {
-                const status = stockStatus(it.quantity, it.threshold);
-                return (
-                  <button
-                    key={it.id}
-                    onClick={() => onSelectItem(it)}
-                    className="inv-row"
+              <div style={{ background: TOKENS.surface, border: `1px solid ${TOKENS.border}`, borderRadius: "12px", padding: "16px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "12px" }}>
+                  <AlertTriangle size={15} color={TOKENS.amber} />
+                  <span style={{ fontSize: "13px", fontWeight: 700 }}>Stock alerts</span>
+                </div>
+                {alerts.length === 0 ? (
+                  <div style={{ fontSize: "12.5px", color: TOKENS.inkSoft }}>Everything is well stocked.</div>
+                ) : (
+                  <div
+                    className="inv-scroll"
                     style={{
                       display: "flex",
-                      alignItems: "center",
-                      justifyContent: "space-between",
-                      padding: "8px 8px",
-                      borderRadius: "8px",
-                      border: "none",
-                      background: "transparent",
-                      cursor: "pointer",
-                      textAlign: "left",
+                      flexDirection: "column",
+                      gap: "4px",
+                      maxHeight: "190px",
+                      overflowY: "auto",
+                      paddingRight: "4px",
                     }}
                   >
-                    <span style={{ fontSize: "12.5px", fontWeight: 600 }}>{it.name}</span>
-                    <span
-                      className="inv-mono"
-                      style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "999px", color: status.color, background: status.bg }}
-                    >
-                      {it.quantity} {it.unit}
-                    </span>
-                  </button>
-                );
-              })}
-            </div>
-          )}
-          <button
-            onClick={onGoToItems}
-            className="inv-btn"
-            style={{ marginTop: "12px", fontSize: "12px", fontWeight: 600, color: TOKENS.teal, background: "none", border: "none", cursor: "pointer", padding: 0 }}
-          >
-            View all items →
-          </button>
-        </div>
-
-       {/* ------------------ RECENT_ACTIVITY--------------------- */}
-
-        <div style={{ background: TOKENS.surface, border: `1px solid ${TOKENS.border}`, borderRadius: "12px", padding: "16px"}}>
-          <div style={{ fontSize: "13px", fontWeight: 700, marginBottom: "12px" }}>Recent activity</div>
-          {recentTx.length === 0 ? (
-            <div style={{ fontSize: "12.5px", color: TOKENS.inkSoft }}>No transactions yet.</div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
-              {recentTx.map((t) => {
-                const m = typeMeta[t.type] || typeMeta.stock_out;
-                const Icon = m.icon;
-                return (
-                  <div key={t.id} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
-                    <div style={{ width: "26px", height: "26px", borderRadius: "7px", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <Icon size={13} color={m.color} />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ fontSize: "12px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                        {t.itemName}
-                      </div>
-                      <div style={{ fontSize: "10.5px", color: TOKENS.inkSoft }}>{fmtDate(t.ts)}</div>
-                    </div>
-                    <div className="inv-mono" style={{ fontSize: "12px", fontWeight: 600, color: m.color, flexShrink: 0 }}>
-                      {t.type === "stock_in" ? "+" : "-"}
-                      {t.qty}
-                    </div>
+                    {alerts.map((it) => {
+                      const status = stockStatus(it.quantity, it.threshold);
+                      return (
+                        <button
+                          key={it.id}
+                          onClick={() => onSelectItem(it)}
+                          className="inv-row"
+                          style={{
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "space-between",
+                            padding: "8px 8px",
+                            borderRadius: "8px",
+                            border: "none",
+                            background: "transparent",
+                            cursor: "pointer",
+                            textAlign: "left",
+                          }}
+                        >
+                          <span style={{ fontSize: "12.5px", fontWeight: 600 }}>{it.name}</span>
+                          <span
+                            className="inv-mono"
+                            style={{ fontSize: "11px", fontWeight: 700, padding: "2px 8px", borderRadius: "999px", color: status.color, background: status.bg }}
+                          >
+                            {it.quantity} {it.unit}
+                          </span>
+                        </button>
+                      );
+                    })}
                   </div>
-                );
-              })}
+                )}
+                <button
+                  onClick={onGoToItems}
+                  className="inv-btn"
+                  style={{ marginTop: "12px", fontSize: "12px", fontWeight: 600, color: TOKENS.teal, background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                >
+                  View all items →
+                </button>
+              </div>
+      
+             {/* ------------------ RECENT_ACTIVITY--------------------- */}
+      
+              <div style={{ background: TOKENS.surface, border: `1px solid ${TOKENS.border}`, borderRadius: "12px", padding: "16px"}}>
+                <div style={{ fontSize: "13px", fontWeight: 700, marginBottom: "12px" }}>Recent activity</div>
+                {recentTx.length === 0 ? (
+                  <div style={{ fontSize: "12.5px", color: TOKENS.inkSoft }}>No transactions yet.</div>
+                ) : (
+                  <div style={{ display: "flex", flexDirection: "column", gap: "10px" }}>
+                    {recentTx.map((t) => {
+                      const m = typeMeta[t.type] || typeMeta.stock_out;
+                      const Icon = m.icon;
+                      return (
+                        <div key={t.id} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                          <div style={{ width: "26px", height: "26px", borderRadius: "7px", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                            <Icon size={13} color={m.color} />
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ fontSize: "12px", fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                              {t.itemName}
+                            </div>
+                            <div style={{ fontSize: "10.5px", color: TOKENS.inkSoft }}>{fmtDate(t.ts)}</div>
+                          </div>
+                          <div className="inv-mono" style={{ fontSize: "12px", fontWeight: 600, color: m.color, flexShrink: 0 }}>
+                            {t.type === "stock_in" ? "+" : "-"}
+                            {t.qty}
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
             </div>
-          )}
-        </div>
-      </div>
     </div>
   );
 }
@@ -805,25 +834,27 @@ function ItemsView({
             <div style={{ fontSize: "14px" }}>{allCount > 0 ? "No items match your filters." : "No items yet. Add one from the 'Add Item' tab."}</div>
           </div>
         ) : (
-          <table style={{ width: "100%", borderCollapse: "collapse", marginTop: "16px" }}>
+          <table className="inv-table" style={{ borderCollapse: "collapse", marginTop: "16px" }}>
             <thead>
               <tr>
                 <th style={{ width: "48px", borderBottom: `1px solid ${TOKENS.border}` }}></th>
                 {colsBeforeBarcode.map(renderSortTh)}
-                <th style={{ textAlign: "left", fontSize: "11px", fontWeight: 700, color: TOKENS.inkSoft, textTransform: "uppercase", letterSpacing: "0.03em", padding: "0 10px 10px", borderBottom: `1px solid ${TOKENS.border}` }}>
-                  Barcode
+                <th
+                  className="inv-th inv-barcode-cell"
+                  onClick={() => onSort("sku")}
+                  style={{ textAlign: "left", fontSize: "11px", fontWeight: 700, color: TOKENS.inkSoft, textTransform: "uppercase", letterSpacing: "0.03em", padding: "0 10px 10px", borderBottom: `1px solid ${TOKENS.border}` }}
+                >
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: "4px" }}>
+                    Barcode <SortIcon active={sortKey === "sku"} dir={sortDir} />
+                  </span>
                 </th>
                 {colsAfterBarcode.map(renderSortTh)}
-                <th style={{ textAlign: "right", fontSize: "11px", fontWeight: 700, color: TOKENS.inkSoft, textTransform: "uppercase", letterSpacing: "0.03em", padding: "0 10px 10px", borderBottom: `1px solid ${TOKENS.border}` }}>
-                  Value
-                </th>
                 <th style={{ borderBottom: `1px solid ${TOKENS.border}` }}></th>
               </tr>
             </thead>
             <tbody>
               {items.map((it) => {
                 const status = stockStatus(it.quantity, it.threshold);
-                const value = (it.unitCost || 0) * it.quantity;
                 return (
                   <tr key={it.id} className="inv-row" style={{ borderBottom: `1px solid ${TOKENS.border}` }}>
                     <td style={{ padding: "10px", cursor: "pointer" }} onClick={() => onSelect(it)}>
@@ -863,9 +894,6 @@ function ItemsView({
                         {status.label}
                       </span>
                     </td>
-                    <td className="inv-mono" style={{ padding: "10px", fontSize: "12px", textAlign: "right", color: TOKENS.inkSoft, cursor: "pointer" }} onClick={() => onSelect(it)}>
-                      {it.unitCost ? money(value) : "—"}
-                    </td>
                     <td style={{ padding: "10px" }}>
                       <div style={{ display: "flex", justifyContent: "flex-end", gap: "2px" }}>
                         <button
@@ -900,7 +928,6 @@ function AddItemView({ onAdd }) {
   const [condition, setCondition] = useState("new");
   const [quantity, setQuantity] = useState("");
   const [unit, setUnit] = useState("pcs");
-  const [unitCost, setUnitCost] = useState("");
   const [threshold, setThreshold] = useState("5");
   const [image, setImage] = useState(null);
   const [err, setErr] = useState("");
@@ -927,7 +954,6 @@ function AddItemView({ onAdd }) {
       condition,
       quantity: q,
       unit: unit.trim() || "pcs",
-      unitCost: unitCost === "" ? null : Number(unitCost),
       threshold: threshold === "" ? 5 : Number(threshold),
       image,
       ts: Date.now(),
@@ -940,7 +966,7 @@ function AddItemView({ onAdd }) {
         Add Item
       </h2>
 
-      <div style={{ display: "flex", gap: "24px", maxWidth: "620px" }}>
+      <div className="inv-add-form" style={{ display: "flex", gap: "24px" }}>
         <div style={{ flexShrink: 0 }}>
           <label
             style={{
@@ -997,12 +1023,10 @@ function AddItemView({ onAdd }) {
             </Field>
           </div>
           <div style={{ display: "flex", gap: "12px" }}>
-            <Field label="Unit cost (₱, optional)" style={{ flex: 1 }}>
-              <input type="number" min="0" step="0.01" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} placeholder="0.00" style={inputStyle} />
-            </Field>
             <Field label="Low-stock threshold" style={{ flex: 1 }}>
               <input type="number" min="0" value={threshold} onChange={(e) => setThreshold(e.target.value)} placeholder="5" style={inputStyle} />
             </Field>
+            <div style={{ flex: 1 }} />
           </div>
 
           {err && <div style={{ fontSize: "12.5px", color: TOKENS.red }}>{err}</div>}
@@ -1010,8 +1034,7 @@ function AddItemView({ onAdd }) {
           <button
             onClick={submit}
             className="inv-btn"
-            style={{ marginTop: "6px", alignSelf: "flex-start", padding: "10px 20px", borderRadius: "8px", border: "none", background: TOKENS.teal, color: "#fff", fontWeight: 600, fontSize: "13.5px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }}
-          >
+            style={{ marginTop: "6px", width: "fit-content", minWidth: "180px", alignSelf: "center", justifyContent: "center", padding: "10px 20px", borderRadius: "8px", border: "none", background: TOKENS.teal, color: "#fff", fontWeight: 600, fontSize: "13.5px", cursor: "pointer", display: "flex", alignItems: "center", gap: "6px" }} >
             <PlusCircle size={15} /> Add to Inventory
           </button>
         </div>
@@ -1045,42 +1068,89 @@ function LogView({ transactions }) {
     stock_in: { label: "Stock In", color: TOKENS.green, bg: TOKENS.greenSoft, icon: ArrowUpCircle },
     stock_out: { label: "Stock Out", color: TOKENS.amber, bg: TOKENS.amberSoft, icon: ArrowDownCircle },
   };
+  const [fromDate, setFromDate] = useState("");
+  const [toDate, setToDate] = useState("");
+  const [page, setPage] = useState(1);
+  const pageSize = 10;
+
+  const filtered = useMemo(() => {
+    const from = fromDate ? new Date(`${fromDate}T00:00:00`).getTime() : -Infinity;
+    const to = toDate ? new Date(`${toDate}T23:59:59.999`).getTime() : Infinity;
+    return transactions.filter((t) => t.ts >= from && t.ts <= to);
+  }, [transactions, fromDate, toDate]);
+
+  useEffect(() => setPage(1), [fromDate, toDate]);
+
+  const pageCount = Math.max(1, Math.ceil(filtered.length / pageSize));
+  const currentPage = Math.min(page, pageCount);
+  const pageItems = filtered.slice((currentPage - 1) * pageSize, currentPage * pageSize);
 
   return (
     <div className="inv-scroll" style={{ padding: "24px", overflowY: "auto", flex: 1, minHeight: 0 }}>
-      <h2 className="inv-display" style={{ fontSize: "18px", fontWeight: 700, margin: "0 0 18px" }}>
-        Transaction Log
-      </h2>
-      {transactions.length === 0 ? (
-        <div style={{ color: TOKENS.inkSoft, fontSize: "13.5px" }}>No transactions yet.</div>
-      ) : (
-        <div style={{ display: "flex", flexDirection: "column", gap: "8px", maxWidth: "760px" }}>
-          {transactions.map((t) => {
-            const m = typeMeta[t.type] || typeMeta.stock_out;
-            const Icon = m.icon;
-            return (
-              <div key={t.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", borderRadius: "10px", border: `1px solid ${TOKENS.border}`, background: TOKENS.surface }}>
-                <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                  <Icon size={16} color={m.color} />
-                </div>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div style={{ fontSize: "13px", fontWeight: 600 }}>{t.itemName}</div>
-                  <div style={{ fontSize: "11.5px", color: TOKENS.inkSoft }}>
-                    {m.label}
-                    {t.remarks ? ` · ${t.remarks}` : ""}
-                  </div>
-                </div>
-                <div style={{ textAlign: "right", flexShrink: 0 }}>
-                  <div className="inv-mono" style={{ fontSize: "13px", fontWeight: 600, color: m.color }}>
-                    {t.type === "stock_in" ? "+" : "-"}
-                    {t.qty}
-                  </div>
-                  <div style={{ fontSize: "10.5px", color: TOKENS.inkSoft }}>{fmtDate(t.ts)}</div>
-                </div>
-              </div>
-            );
-          })}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px", flexWrap: "wrap", marginBottom: "18px" }}>
+        <h2 className="inv-display" style={{ fontSize: "18px", fontWeight: 700, margin: 0 }}>
+          Transaction Log
+        </h2>
+        <div className="inv-log-filter">
+          <label style={{ fontSize: "11.5px", color: TOKENS.inkSoft, fontWeight: 600 }}>From</label>
+          <input type="date" value={fromDate} onChange={(e) => setFromDate(e.target.value)} style={{ ...inputStyle, background: TOKENS.surface }} />
+          <label style={{ fontSize: "11.5px", color: TOKENS.inkSoft, fontWeight: 600 }}>To</label>
+          <input type="date" value={toDate} onChange={(e) => setToDate(e.target.value)} style={{ ...inputStyle, background: TOKENS.surface }} />
+          {(fromDate || toDate) && (
+            <button onClick={() => { setFromDate(""); setToDate(""); }} style={{ ...inputStyle, cursor: "pointer", background: TOKENS.surface }}>
+              Clear
+            </button>
+          )}
         </div>
+      </div>
+
+      {filtered.length === 0 ? (
+        <div style={{ color: TOKENS.inkSoft, fontSize: "13.5px" }}>
+          {transactions.length ? "No transactions match the selected date range." : "No transactions yet."}
+        </div>
+      ) : (
+        <>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", width: "100%" }}>
+            {pageItems.map((t) => {
+              const m = typeMeta[t.type] || typeMeta.stock_out;
+              const Icon = m.icon;
+              return (
+                <div key={t.id} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "10px 14px", borderRadius: "10px", border: `1px solid ${TOKENS.border}`, background: TOKENS.surface }}>
+                  <div style={{ width: "32px", height: "32px", borderRadius: "8px", background: m.bg, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <Icon size={16} color={m.color} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ fontSize: "13px", fontWeight: 600 }}>{t.itemName}</div>
+                    <div style={{ fontSize: "11.5px", color: TOKENS.inkSoft }}>
+                      {m.label}{t.remarks ? ` · ${t.remarks}` : ""}
+                    </div>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div className="inv-mono" style={{ fontSize: "13px", fontWeight: 600, color: m.color }}>
+                      {t.type === "stock_in" ? "+" : "-"}{t.qty}
+                    </div>
+                    <div style={{ fontSize: "10.5px", color: TOKENS.inkSoft }}>{fmtDate(t.ts)}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", marginTop: "16px", paddingTop: "14px", borderTop: `1px solid ${TOKENS.border}`, flexWrap: "wrap" }}>
+            <span style={{ fontSize: "11.5px", color: TOKENS.inkSoft }}>
+              Showing {((currentPage - 1) * pageSize) + 1}–{Math.min(currentPage * pageSize, filtered.length)} of {filtered.length}
+            </span>
+            <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+              <button disabled={currentPage === 1} onClick={() => setPage((p) => Math.max(1, p - 1))} style={{ ...inputStyle, cursor: currentPage === 1 ? "not-allowed" : "pointer", opacity: currentPage === 1 ? 0.45 : 1, background: TOKENS.surface }}>
+                ← Previous
+              </button>
+              <span className="inv-mono" style={{ fontSize: "12px", padding: "0 6px" }}>{currentPage} / {pageCount}</span>
+              <button disabled={currentPage === pageCount} onClick={() => setPage((p) => Math.min(pageCount, p + 1))} style={{ ...inputStyle, cursor: currentPage === pageCount ? "not-allowed" : "pointer", opacity: currentPage === pageCount ? 0.45 : 1, background: TOKENS.surface }}>
+                Next →
+              </button>
+            </div>
+          </div>
+        </>
       )}
     </div>
   );
@@ -1119,7 +1189,6 @@ function ItemDetailModal({ item, history, onClose, actionType, setActionType, on
     stock_out: { title: "Deduct Stock", color: TOKENS.amber, icon: ArrowDownCircle, qtyLabel: "Quantity to deduct" },
   };
 
-  const value = (item.unitCost || 0) * item.quantity;
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(28,35,51,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 50, padding: "20px" }}>
@@ -1154,11 +1223,6 @@ function ItemDetailModal({ item, history, onClose, actionType, setActionType, on
           <div className="inv-mono" style={{ fontSize: "30px", fontWeight: 600, margin: "14px 0 2px" }}>
             {item.quantity} <span style={{ fontSize: "13px", color: TOKENS.inkSoft, fontFamily: "'Inter', sans-serif" }}>{item.unit} available</span>
           </div>
-          {item.unitCost ? (
-            <div style={{ fontSize: "12px", color: TOKENS.inkSoft }}>
-              {money(item.unitCost)} / {item.unit} · total value {money(value)}
-            </div>
-          ) : null}
 
           {!actionType ? (
             <>
@@ -1245,7 +1309,6 @@ function EditItemModal({ item, onClose, onSave, onDelete }) {
   const [category, setCategory] = useState(item.category || "");
   const [condition, setCondition] = useState(item.condition || "new");
   const [unit, setUnit] = useState(item.unit);
-  const [unitCost, setUnitCost] = useState(item.unitCost ?? "");
   const [threshold, setThreshold] = useState(item.threshold ?? 5);
   const [image, setImage] = useState(item.image || null);
   const [err, setErr] = useState("");
@@ -1270,7 +1333,6 @@ function EditItemModal({ item, onClose, onSave, onDelete }) {
       category: category.trim(),
       condition,
       unit: unit.trim() || "pcs",
-      unitCost: unitCost === "" ? null : Number(unitCost),
       threshold: threshold === "" ? 5 : Number(threshold),
       image,
     });
@@ -1278,7 +1340,7 @@ function EditItemModal({ item, onClose, onSave, onDelete }) {
 
   return (
     <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(28,35,51,0.45)", display: "flex", alignItems: "center", justifyContent: "center", zIndex: 60, padding: "20px" }}>
-      <div onClick={(e) => e.stopPropagation()} className="inv-scroll" style={{ background: TOKENS.bg, borderRadius: "14px", width: "540px", maxWidth: "100%", maxHeight: "88vh", overflowY: "auto", fontFamily: "'Inter', sans-serif", padding: "22px" }}>
+      <div onClick={(e) => e.stopPropagation()} className="inv-edit-modal" style={{ background: TOKENS.bg, borderRadius: "14px", fontFamily: "'Inter', sans-serif", padding: "22px" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: "16px" }}>
           <h3 className="inv-display" style={{ fontSize: "16px", fontWeight: 700, margin: 0 }}>Edit Item</h3>
           <button onClick={onClose} style={{ width: "26px", height: "26px", borderRadius: "50%", border: "none", background: TOKENS.surfaceAlt, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
@@ -1286,7 +1348,7 @@ function EditItemModal({ item, onClose, onSave, onDelete }) {
           </button>
         </div>
 
-        <div style={{ display: "flex", gap: "20px" }}>
+        <div className="inv-edit-layout">
           <div style={{ flexShrink: 0 }}>
             <label style={{ display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", width: "130px", height: "130px", borderRadius: "10px", border: `1.5px dashed ${TOKENS.border}`, background: image ? `url(${image}) center/cover` : TOKENS.surface, cursor: "pointer", gap: "6px" }}>
               {!image && (
@@ -1327,9 +1389,6 @@ function EditItemModal({ item, onClose, onSave, onDelete }) {
             <div style={{ display: "flex", gap: "10px" }}>
               <Field label="Unit" style={{ flex: 1 }}>
                 <input value={unit} onChange={(e) => setUnit(e.target.value)} style={inputStyle} />
-              </Field>
-              <Field label="Unit cost (₱)" style={{ flex: 1 }}>
-                <input type="number" min="0" step="0.01" value={unitCost} onChange={(e) => setUnitCost(e.target.value)} style={inputStyle} />
               </Field>
               <Field label="Low-stock threshold" style={{ flex: 1 }}>
                 <input type="number" min="0" value={threshold} onChange={(e) => setThreshold(e.target.value)} style={inputStyle} />
