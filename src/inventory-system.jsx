@@ -119,12 +119,12 @@ function stockStatus(qty, threshold = 5) {
 function Barcode({ value = "" }) {
   const bars = useMemo(() => {
     const out = [];
-    const seedStr = value || "0000";
+    const seedStr = value || "000000";
     for (let i = 0; i < seedStr.length; i++) {
-      out.push((seedStr.charCodeAt(i) % 3) + 1);
+      out.push((seedStr.charCodeAt(i) % 5) + 1);
     }
     while (out.length < 18) {
-      out.push(((out.length * 7 + seedStr.length * 3) % 3) + 1);
+      out.push(((out.length * 7 + seedStr.length * 5) % 5) + 1);
     }
     return out;
   }, [value]);
@@ -313,11 +313,10 @@ export default function InventorySystem() {
         fontFamily: "'Inter', sans-serif",
         background: TOKENS.bg,
         color: TOKENS.ink,
-        height: "100vh",
+        position:"fixed",
+        inset:0,
         display: "flex",
-        borderRadius: "12px",
         overflow: "hidden",
-        border: `1px solid ${TOKENS.border}`,
       }}
     >
       <style>{`
@@ -369,19 +368,25 @@ export default function InventorySystem() {
       {/* Sidebar */}
       <div
         style={{
-          width: "220px",
-          flexShrink: 0,
-          background: TOKENS.ink,
-          color: "#F5F4EF",
-          padding: "24px 16px",
-          display: "flex",
-          flexDirection: "column",
-          gap: "6px",
-          height: "100%",
-          overflowY: "auto",
-          boxSizing: "border-box",
-        }}
-      >
+        width: "220px",
+        position: "fixed",
+        top: 0,
+        left: 0,
+        bottom: 0,
+
+        background: TOKENS.ink,
+        color: "#F5F4EF",
+
+        padding: "24px 16px",
+        display: "flex",
+        flexDirection: "column",
+        gap: "6px",
+
+        overflowY: "auto",
+        boxSizing: "border-box",
+         zIndex: 100,
+      }}
+    >
         <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "28px", paddingLeft: "8px" }}>
           <Boxes size={22} color={TOKENS.tealSoft} />
           <span className="inv-display" style={{ fontSize: "17px", fontWeight: 700, letterSpacing: "-0.01em" }}>
@@ -437,7 +442,20 @@ export default function InventorySystem() {
       </div>
 
       {/* Main */}
-      <div style={{ flex: 1, display: "flex", flexDirection: "column", minWidth: 0, minHeight: 0, height: "100%", overflow: "hidden" }}>
+      <div 
+        style={{
+          marginLeft: "220px", // same width as the fixed sidebar
+          flex: 1,
+          height: "100vh",
+
+          display: "flex",
+          flexDirection: "column",
+
+          minWidth: 0,
+          minHeight: 0,
+          overflow: "hidden",
+        }}
+       >
         {!ready ? (
           <div style={{ padding: "40px", color: TOKENS.inkSoft }}>Loading...</div>
         ) : loadError ? (
